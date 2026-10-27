@@ -1,0 +1,17 @@
+[project]
+name = "antsim"
+version = "0.2.0"
+description = "NEC2 (nec2c) wire-antenna modelling harness, designed to be driven by Claude Code"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy", "matplotlib"]
+
+[project.scripts]
+antsim = "antsim.cli:main"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["antsim"]

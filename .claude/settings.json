@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m antsim:*)",
+      "Bash(python3 -m antsim.tune:*)",
+      "Bash(python3 -m antsim.multiband:*)",
+      "Bash(python3 -m unittest:*)",
+      "Bash(nec2c:*)",
+      "Read(out/**)"
+    ]
+  }
+}
