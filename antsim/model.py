@@ -48,6 +48,18 @@ class Ground:
     @classmethod
     def real(cls, eps_r=13.0, sigma=0.005): return cls("real", eps_r, sigma)
 
+    @property
+    def theta_max(self) -> float:
+        """Patterns cover the full sphere in free space, the upper hemisphere over ground."""
+        return 180.0 if self.kind == "free" else 90.0
+
+    def cards(self) -> list[str]:
+        if self.kind == "free":
+            return ["GE 0"]
+        if self.kind == "perfect":
+            return ["GE 1", "GN 1"]
+        return ["GE 1", f"GN 2 0 0 0 {self.eps_r} {self.sigma}"]   # Sommerfeld/Norton ground
+
 
 @dataclass
 class Feedline:
@@ -164,19 +176,24 @@ class Model:
         if self.center_freq is None:
             self.center_freq = (self.sweep[0] + self.sweep[1]) / 2
 
-    def absolute_segment(self, tag: int, seg: int) -> int:
-        """nec2c reports segments by absolute index across all wires."""
-        return sum(w.segments for w in self.wires[:tag - 1]) + seg
+    @property
+    def nec_feed(self) -> tuple[int, int]:
+        """The feed as nec2c reports it: (tag, absolute segment index across all wires)."""
+        tag, seg = self.feed
+        return tag, sum(w.segments for w in self.wires[:tag - 1]) + seg
+
+    def _exists(self, tag: int, seg: int) -> bool:
+        return 1 <= tag <= len(self.wires) and 1 <= seg <= self.wires[tag - 1].segments
 
     def check(self) -> list[str]:
         """Return a list of modelling-guideline warnings."""
         warn = []
         lam_min = wavelength(self.sweep[1])
         tag, seg = self.feed
-        if not 1 <= tag <= len(self.wires) or not 1 <= seg <= self.wires[tag - 1].segments:
+        if not self._exists(tag, seg):
             warn.append(f"feed (tag {tag}, seg {seg}) does not exist")
         for ld in self.loads:
-            if not 1 <= ld.tag <= len(self.wires) or not 1 <= ld.seg <= self.wires[ld.tag - 1].segments:
+            if not self._exists(ld.tag, ld.seg):
                 warn.append(f"load (tag {ld.tag}, seg {ld.seg}) does not exist")
         # Wires meant to join must share endpoints exactly; a near miss leaves them unconnected.
         ends = [(w, p) for w in self.wires for p in (w.p1, w.p2)]
@@ -202,7 +219,8 @@ class Model:
                 warn.append(f"wire {w.tag}: below ground (z < 0)")
         return warn
 
-    def _geometry(self) -> list[str]:
+    def geometry_cards(self) -> list[str]:
+        """Every card up to and including EX; append FR/RP/XQ cards and EN to run it."""
         # nec2c reads fixed-width cards: long comment lines crash it, so wrap them
         lines = [f"CM {self.name}"]
         for d in self.description.strip().splitlines():
@@ -212,12 +230,7 @@ class Model:
             (x1, y1, z1), (x2, y2, z2) = w.p1, w.p2
             lines.append(f"GW {w.tag} {w.segments} {x1:.5f} {y1:.5f} {z1:.5f} "
                          f"{x2:.5f} {y2:.5f} {z2:.5f} {w.radius:.6f}")
-        lines.append("GE 0" if self.ground.kind == "free" else "GE 1")
-        if self.ground.kind == "perfect":
-            lines.append("GN 1")
-        elif self.ground.kind == "real":
-            # Sommerfeld/Norton ground
-            lines.append(f"GN 2 0 0 0 {self.ground.eps_r} {self.ground.sigma}")
+        lines += self.ground.cards()
         lines += [ld.card() for ld in self.loads]
         if self.conductivity:
             lines.append(f"LD 5 0 0 0 {self.conductivity:.6g}")
@@ -225,24 +238,21 @@ class Model:
         lines.append(f"EX 0 {tag} {seg} 0 1.0 0.0")
         return lines
 
+    def _rp_card(self, step: float) -> str:
+        nth = int(round(self.ground.theta_max / step)) + 1
+        nph = int(round(360.0 / step))
+        return f"RP 0 {nth} {nph} 0000 0 0 {step:g} {step:g}"
+
     def sweep_deck(self, pattern: bool = True) -> str:
         f0, f1, n = self.sweep
         step = (f1 - f0) / (n - 1) if n > 1 else 0.0
         # 5° pattern per frequency; integrating it gives radiated/input power and hence
         # radiation resistance (nec2c's own XNDA averaging misses the polar caps).
-        nth = 37 if self.ground.kind == "free" else 19
-        lines = self._geometry()
-        lines += [f"FR 0 {n} 0 0 {f0:.6f} {step:.6f}",
-                  f"RP 0 {nth} 72 0000 0 0 5 5" if pattern else "XQ", "EN"]
+        lines = self.geometry_cards()
+        lines += [f"FR 0 {n} 0 0 {f0:.6f} {step:.6f}", self._rp_card(5) if pattern else "XQ", "EN"]
         return "\n".join(lines) + "\n"
 
     def pattern_deck(self) -> str:
-        s = self.pattern_step
-        theta_max = 90.0 if self.ground.kind != "free" else 180.0
-        nth = int(round(theta_max / s)) + 1
-        nph = int(round(360.0 / s))
-        lines = self._geometry()
-        lines += [f"FR 0 1 0 0 {self.center_freq:.6f} 0",
-                  f"RP 0 {nth} {nph} 0000 0 0 {s} {s}",
-                  "EN"]
+        lines = self.geometry_cards()
+        lines += [f"FR 0 1 0 0 {self.center_freq:.6f} 0", self._rp_card(self.pattern_step), "EN"]
         return "\n".join(lines) + "\n"

@@ -8,9 +8,14 @@ import subprocess
 
 import numpy as np
 
-from .model import Feedline, Model
+from .model import Feedline, FeedlineChain, Model
 
 _FREQ = re.compile(r"FREQUENCY\s*:\s*([-\d.E+]+)\s*MHz")
+
+
+def swr(z, z0: float = 50.0):
+    g = np.abs((z - z0) / (z + z0))
+    return (1 + g) / (1 - g)
 
 
 @dataclass
@@ -19,7 +24,7 @@ class Sweep:
     z: np.ndarray      # complex ohms
     z0: float
     rad_fraction: np.ndarray | None = None  # radiated / input power, from pattern averaging
-    feedline: Feedline | None = None
+    feedline: Feedline | FeedlineChain | None = None
 
     @property
     def z_line(self):
@@ -33,12 +38,17 @@ class Sweep:
         return self.z.real * self.rad_fraction
 
     @property
-    def gamma(self): return (self.z_line - self.z0) / (self.z_line + self.z0)
-
-    @property
     def swr(self):
-        g = np.abs(self.gamma)
-        return (1 + g) / (1 - g)
+        return swr(self.z_line, self.z0)
+
+    def efficiency(self, i: int) -> str:
+        """Radiation efficiency at sweep point i, e.g. "36% (-4.4 dB)"."""
+        e = self.rad_fraction[i]
+        return f"{100 * e:.0f}% ({10 * np.log10(e):.1f} dB)"
+
+    def index(self, f: float) -> int:
+        """Index of the sweep frequency nearest to f (MHz)."""
+        return int(np.argmin(np.abs(self.freq - f)))
 
     def resonances(self, at: str = "antenna") -> list[float]:
         """Frequencies where X crosses zero (linear interpolation), at the antenna or line input."""
@@ -56,23 +66,43 @@ class Pattern:
     phi: np.ndarray    # unique phi values, degrees
     gain: np.ndarray   # total gain dBi, shape (len(phi), len(theta))
 
-    def peak(self):
-        """(gain, theta, phi) of max gain. In free space (full sphere) search the
-        horizontal plane only, so cuts stay meaningful for symmetric patterns."""
-        if self.theta.max() > 90 and 90 in self.theta:
+    @property
+    def full_sphere(self) -> bool:
+        """Free-space decks run theta to 180°, decks over ground to about 90°."""
+        return self.theta.max() > 135
+
+    def _peak_index(self) -> tuple[int, int]:
+        # in free space search the horizontal plane only, so cuts stay meaningful
+        # for symmetric patterns
+        if self.full_sphere and 90 in self.theta:
             it = int(np.searchsorted(self.theta, 90))
-            ip = int(np.argmax(self.gain[:, it]))
-        else:
-            ip, it = np.unravel_index(np.argmax(self.gain), self.gain.shape)
+            return int(np.argmax(self.gain[:, it])), it
+        ip, it = np.unravel_index(np.argmax(self.gain), self.gain.shape)
+        return int(ip), int(it)
+
+    def peak(self):
+        """(gain, theta, phi) of max gain."""
+        ip, it = self._peak_index()
         return self.gain[ip, it], self.theta[it], self.phi[ip]
+
+    def phi_index(self, az: float) -> int:
+        """Index of the pattern azimuth nearest to `az` degrees (wrapping at 360°)."""
+        return int(np.argmin(np.abs((self.phi - az + 180) % 360 - 180)))
+
+    def theta_index(self, elev: float) -> int:
+        """Index of the pattern theta nearest to elevation `elev` degrees."""
+        return int(np.argmin(np.abs(self.theta - (90 - elev))))
+
+    def azimuth_cut(self, elev: float) -> tuple[np.ndarray, float]:
+        """(gain over phi, actual elevation) at the theta nearest to `elev`."""
+        it = self.theta_index(elev)
+        return self.gain[:, it], 90 - self.theta[it]
 
     def front_to_back(self) -> float | None:
         """Peak gain minus gain 180° away in azimuth, at the peak's elevation.
         None for patterns that are symmetric front-to-back (under 0.5 dB)."""
-        g, th, ph = self.peak()
-        it = int(np.argmin(np.abs(self.theta - th)))
-        ib = int(np.argmin(np.abs((self.phi - ph - 180 + 180) % 360 - 180)))
-        fb = float(g - self.gain[ib, it])
+        ip, it = self._peak_index()
+        fb = float(self.gain[ip, it] - self.gain[self.phi_index(self.phi[ip] + 180), it])
         return fb if fb >= 0.5 else None
 
 
@@ -87,19 +117,16 @@ def run_nec(deck: str, path: Path) -> str:
     return out.read_text()
 
 
-def parse_sweep(text: str, feed: tuple[int, int], z0: float) -> Sweep:
-    freqs, zs = _parse_freq_z(text, feed)
+def parse_sweep(text: str, feed: tuple[int, int], z0: float,
+                feedline: Feedline | FeedlineChain | None = None) -> Sweep:
+    freqs, zs = parse_freq_z(text, feed)
     frac = [radiated_fraction(p) for p in parse_patterns(text)]
     if len(frac) != len(freqs):
         raise RuntimeError(f"expected {len(freqs)} RADIATION PATTERNS blocks, got {len(frac)}")
-    return Sweep(np.array(freqs), np.array(zs), z0, np.array(frac))
+    return Sweep(np.array(freqs), np.array(zs), z0, np.array(frac), feedline)
 
 
-def _parse_z(text: str, feed: tuple[int, int]) -> np.ndarray:
-    return np.array(_parse_freq_z(text, feed)[1])
-
-
-def _parse_freq_z(text: str, feed: tuple[int, int]) -> tuple[list[float], list[complex]]:
+def parse_freq_z(text: str, feed: tuple[int, int]) -> tuple[list[float], list[complex]]:
     freqs, zs = [], []
     lines = text.splitlines()
     current_f = None
@@ -123,15 +150,15 @@ def _parse_freq_z(text: str, feed: tuple[int, int]) -> tuple[list[float], list[c
 
 def parse_patterns(text: str) -> list[Pattern]:
     """All RADIATION PATTERNS blocks, one per frequency, in output order."""
-    out, start = [], 0
-    while (i := text.find("RADIATION PATTERNS", start)) >= 0:
-        out.append(_parse_rp_block(text, i))
-        start = i + 1
+    # one scan for block and FREQUENCY offsets; each block then reads only its own slice
+    starts = [m.start() for m in re.finditer("RADIATION PATTERNS", text)]
+    freqs = [(m.start(), float(m.group(1))) for m in _FREQ.finditer(text)]
+    out, k = [], 0
+    for i, j in zip(starts, starts[1:] + [len(text)]):
+        while k + 1 < len(freqs) and freqs[k + 1][0] < i:
+            k += 1
+        out.append(_parse_rp_block(text[i:j], freqs[k][1]))
     return out
-
-
-def parse_pattern(text: str) -> Pattern:
-    return _parse_rp_block(text, text.index("RADIATION PATTERNS"))
 
 
 def radiated_fraction(p: Pattern) -> float:
@@ -143,10 +170,10 @@ def radiated_fraction(p: Pattern) -> float:
     return float(np.trapz(over_phi * np.sin(th), th) / (4 * np.pi))
 
 
-def _parse_rp_block(text: str, i: int) -> Pattern:
-    f = float(_FREQ.findall(text[:i])[-1])
+def _parse_rp_block(block: str, f: float) -> Pattern:
+    """One RADIATION PATTERNS block (starting at its header) computed at f MHz."""
     rows = []
-    for line in text[i:].splitlines()[5:]:
+    for line in block.splitlines()[5:]:
         p = line.split()
         if len(p) < 5:
             break
@@ -165,17 +192,14 @@ def _parse_rp_block(text: str, i: int) -> Pattern:
 
 def simulate(model: Model, outdir: Path) -> tuple[Sweep, Pattern]:
     outdir.mkdir(parents=True, exist_ok=True)
-    tag, seg = model.feed
-    feed = (tag, model.absolute_segment(tag, seg))
-    sweep = parse_sweep(run_nec(model.sweep_deck(), outdir / "sweep"), feed, model.z0)
-    sweep.feedline = model.feedline
-    pattern = parse_pattern(run_nec(model.pattern_deck(), outdir / "pattern"))
+    sweep = parse_sweep(run_nec(model.sweep_deck(), outdir / "sweep"), model.nec_feed,
+                        model.z0, model.feedline)
+    pattern = parse_patterns(run_nec(model.pattern_deck(), outdir / "pattern"))[0]
     return sweep, pattern
 
 
 def impedance(model: Model, outdir: Path) -> np.ndarray:
     """Feed-point impedance over the model's sweep, without patterns (fast)."""
     outdir.mkdir(parents=True, exist_ok=True)
-    tag, seg = model.feed
     text = run_nec(model.sweep_deck(pattern=False), outdir / "z")
-    return _parse_z(text, (tag, model.absolute_segment(tag, seg)))
+    return np.array(parse_freq_z(text, model.nec_feed)[1])

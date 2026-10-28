@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+from concurrent.futures import ProcessPoolExecutor
 import shutil
 import sys
 from pathlib import Path
@@ -30,16 +31,25 @@ def cmd_run(argv) -> int:
     ap.add_argument("--only", help="run only the model with this name (when a file defines several)")
     a = ap.parse_args(argv)
     from .report import run_model
+    models = []
     for path in a.files:
-        models = load_models(path)
+        found = load_models(path)
         if a.only:
-            models = [m for m in models if m.name == a.only]
-            if not models:
+            found = [m for m in found if m.name == a.only]
+            if not found:
                 raise SystemExit(f"{path}: no model named {a.only!r}")
-        for m in models:
-            outdir = out_root() / m.name
-            print(run_model(m, outdir))
-            print(f"→ {outdir}/ (swr.png, pattern.png, azimuth.png, summary.md, *.nec, *.out)\n")
+        models += found
+    outdirs = [out_root() / m.name for m in models]
+    # models are independent (each owns out/<name>/), so run them on all cores;
+    # map() keeps the summaries in input order
+    if len(models) == 1:
+        summaries = [run_model(models[0], outdirs[0])]
+    else:
+        with ProcessPoolExecutor() as ex:
+            summaries = ex.map(run_model, models, outdirs)
+    for text, outdir in zip(summaries, outdirs):
+        print(text)
+        print(f"→ {outdir}/ (swr.png, pattern.png, azimuth.png, summary.md, *.nec, *.out)\n")
     return 0
 
 
@@ -100,10 +110,12 @@ def cmd_doctor(argv) -> int:
         print("Install nec2c (e.g. `apt install nec2c`) and `pip install numpy matplotlib`.")
         return 1
     # Sanity: a free-space half-wave dipole is ~73 Ω and radiates ~100% of its input
-    from .model import Model, Wire
+    from .model import Model
     from .nec import simulate
-    m = Model("_doctor_dipole", [Wire((0, -5.136, 0), (0, 5.136, 0), 0.000814, 21)],
-              sweep=(14.175, 14.175, 1))
+    from .shapes import dipole
+    from .wire_gauge import AWG
+    wires, info = dipole(10.272, 0, AWG[14])
+    m = Model("_doctor_dipole", wires, feed=info["feed"], sweep=(14.175, 14.175, 1))
     s, _ = simulate(m, out_root() / "_doctor")
     z, eff = s.z[0], s.rad_fraction[0]
     good = 60 < z.real < 85 and abs(eff - 1) < 0.05

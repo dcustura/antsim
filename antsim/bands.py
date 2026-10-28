@@ -39,6 +39,3 @@ def band_of(f_mhz: float, region: int | None = None) -> str | None:
         if f0 <= f_mhz <= f1:
             return name
     return None
-
-
-BANDS_R3 = bands(3)

@@ -9,6 +9,7 @@ import numpy as np
 from antsim import AWG, Feedline, FeedlineChain, Ground, Load, Model, Transformer, Wire, awg
 from antsim import shapes
 from antsim.bands import band_of, bands
+from antsim.model import wavelength
 from antsim.nec import impedance, simulate
 
 HAVE_NEC = shutil.which("nec2c") is not None
@@ -21,7 +22,7 @@ class TestPure(unittest.TestCase):
 
     def test_feedline_half_wave_repeats_load(self):
         f = 10.0
-        line = Feedline(450, 299.792458 / f / 2)
+        line = Feedline(450, wavelength(f) / 2)
         self.assertAlmostEqual(complex(line.transform(73 + 20j, f)), 73 + 20j, places=6)
 
     def test_chain_transformer(self):

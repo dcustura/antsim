@@ -40,7 +40,8 @@ def find_lengths(build: Callable[[float], Model], f: float, lo: float, hi: float
     Solutions with R > max_r (at the chosen point) are dropped.
     Returns (solutions, scan) where scan rows are (length, z_ant, z_line)."""
     workdir = workdir or out_root() / "_tune"
-    pick = (lambda za, zl: za.imag) if at == "antenna" else (lambda za, zl: zl.imag)
+    side = (lambda za, zl: za) if at == "antenna" else (lambda za, zl: zl)
+    pick = lambda za, zl: side(za, zl).imag
     scan = [(L, *_z(build, L, f, workdir)) for L in np.linspace(lo, hi, n)]
     sols = []
     for (l0, za0, zl0), (l1, za1, zl1) in zip(scan, scan[1:]):
@@ -60,7 +61,7 @@ def find_lengths(build: Callable[[float], Model], f: float, lo: float, hi: float
                 l0, x0 = lm, xm
         L = (l0 + l1) / 2
         sol = Solution(L, *_z(build, L, f, workdir))
-        r = (sol.z_ant if at == "antenna" else sol.z_line).real
+        r = side(sol.z_ant, sol.z_line).real
         if max_r is None or r <= max_r:
             sols.append(sol)
     return sols, scan

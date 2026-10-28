@@ -18,17 +18,19 @@ from .model import Wire, wavelength
 def segments_for(length: float, f_max: float, per_wavelength: int = 40, minimum: int = 1) -> int:
     """Odd segment count giving at least `per_wavelength` segments per λ at f_max
     (40/λ = 20 per half-wave, comfortably under the λ/10 limit)."""
-    n = max(minimum, math.ceil(length / wavelength(f_max) * per_wavelength))
+    return _odd(max(minimum, math.ceil(length / wavelength(f_max) * per_wavelength)))
+
+
+def _odd(n: int) -> int:
+    """Round a segment count up to odd, so the wire has a centre segment for the feed."""
     return n if n % 2 else n + 1
 
 
 def dipole(length: float, height: float, radius: float, segments: int = 21) -> tuple[list[Wire], dict]:
     """Straight centre-fed dipole along Y. Feed is the centre segment of wire 1."""
     h = length / 2
-    if segments % 2 == 0:
-        segments += 1
-    wires = [Wire((0, -h, height), (0, h, height), radius, segments)]
-    return wires, dict(feed=(1, segments // 2 + 1))
+    wires = [Wire((0, -h, height), (0, h, height), radius, _odd(segments))]
+    return wires, dict(feed=(1, wires[0].center_segment))
 
 
 def inverted_v(total: float, apex: float, end_height: float, radius: float,
@@ -66,7 +68,7 @@ def trap_dipole(inner: float, outer: float, height: float, radius: float,
         Wire((0, -hi, height), (0, -y_out, height), radius, 1),           # trap −Y
         Wire((0, -y_out, height), (0, -y_out - outer, height), radius, outer_segments),
     ]
-    return wires, dict(feed=(1, inner_segments // 2 + 1), traps=[(2, 1), (4, 1)],
+    return wires, dict(feed=(1, wires[0].center_segment), traps=[(2, 1), (4, 1)],
                        total=inner + 2 * s + 2 * outer)
 
 
@@ -111,11 +113,10 @@ def quad_loop(perimeter: float, bottom: float, radius: float, segments: int = 21
     s = perimeter / 4
     h = s / 2
     z0, z1 = bottom, bottom + s
-    if segments % 2 == 0:
-        segments += 1
+    segments = _odd(segments)
     corners = [(0, -h, z0), (0, h, z0), (0, h, z1), (0, -h, z1)]
     wires = [Wire(corners[i], corners[(i + 1) % 4], radius, segments) for i in range(4)]
-    return wires, dict(feed=(1, segments // 2 + 1), side=s)
+    return wires, dict(feed=(1, wires[0].center_segment), side=s)
 
 
 def delta_loop(perimeter: float, bottom: float, radius: float, segments: int = 21) -> tuple[list[Wire], dict]:
@@ -124,11 +125,10 @@ def delta_loop(perimeter: float, bottom: float, radius: float, segments: int = 2
     s = perimeter / 3
     h = s / 2
     top = bottom + s * math.sqrt(3) / 2
-    if segments % 2 == 0:
-        segments += 1
+    segments = _odd(segments)
     a, b, c = (0, -h, bottom), (0, h, bottom), (0, 0, top)
     wires = [Wire(a, b, radius, segments), Wire(b, c, radius, segments), Wire(c, a, radius, segments)]
-    return wires, dict(feed=(1, segments // 2 + 1), side=s, top=top)
+    return wires, dict(feed=(1, wires[0].center_segment), side=s, top=top)
 
 
 def yagi(elements: list[tuple[float, float]], height: float, radius: float, driven: int = 1,
@@ -136,8 +136,6 @@ def yagi(elements: list[tuple[float, float]], height: float, radius: float, driv
     """Yagi with elements along Y, boom along X, beam towards +X (azimuth 0°).
     `elements` = [(x_position, length), ...] from the reflector forward; `driven` is the
     0-based index of the fed element. Tags follow the list order."""
-    if segments % 2 == 0:
-        segments += 1
-    wires = [Wire((x, -L / 2, height), (x, L / 2, height), radius, segments) for x, L in elements]
+    wires = [Wire((x, -L / 2, height), (x, L / 2, height), radius, _odd(segments)) for x, L in elements]
     xs = [x for x, _ in elements]
-    return wires, dict(feed=(driven + 1, segments // 2 + 1), boom=max(xs) - min(xs))
+    return wires, dict(feed=(driven + 1, wires[driven].center_segment), boom=max(xs) - min(xs))

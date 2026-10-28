@@ -22,9 +22,9 @@ from pathlib import Path
 
 import numpy as np
 
-from .bands import BANDS_R3, DEFAULT_BANDS, bands as band_plan, default_region
+from .bands import DEFAULT_BANDS, bands as band_plan, default_region
 from .model import Feedline, FeedlineChain, Transformer
-from .nec import _parse_freq_z, run_nec
+from .nec import parse_freq_z, run_nec, swr
 from .workspace import load_build, out_root
 
 
@@ -36,7 +36,7 @@ def band_freqs(f0: float, f1: float) -> np.ndarray:
 
 def antenna_z(model, bands: dict, workdir: Path) -> tuple[np.ndarray, np.ndarray]:
     """Antenna impedance at band_freqs() of every band: one deck, FR/XQ per band."""
-    lines = [l for l in model.sweep_deck(pattern=False).splitlines() if not l.startswith(("FR", "XQ", "EN"))]
+    lines = model.geometry_cards()
     freqs = []
     for f0, f1 in bands.values():
         fs = band_freqs(f0, f1)
@@ -44,10 +44,9 @@ def antenna_z(model, bands: dict, workdir: Path) -> tuple[np.ndarray, np.ndarray
         lines += [f"FR 0 {len(fs)} 0 0 {f0:.6f} {step:.6f}", "XQ"]
         freqs.append(fs)
     lines.append("EN")
-    tag, seg = model.feed
     workdir.mkdir(parents=True, exist_ok=True)
     text = run_nec("\n".join(lines) + "\n", workdir / "mb")
-    f, z = _parse_freq_z(text, (tag, model.absolute_segment(tag, seg)))
+    f, z = parse_freq_z(text, model.nec_feed)
     return np.array(f), np.array(z)
 
 
@@ -57,17 +56,13 @@ def _job(args):
     return antenna_z(m, bands, out_root() / "_multiband" / f"L{length:.3f}")
 
 
-def swr(z, z0=50.0):
-    g = np.abs((z - z0) / (z + z0))
-    return (1 + g) / (1 - g)
-
-
 @dataclass
 class Result:
     wire: float
     line: float
     band_max_swr: dict          # band -> worst SWR in band
     band_coverage: dict         # band -> fraction of points with SWR < limit
+    limit: float                # the SWR limit
 
     @property
     def n_ok(self): return sum(c == 1.0 for c in self.band_coverage.values())
@@ -75,11 +70,8 @@ class Result:
     @property
     def score(self):
         # bands fully covered first, then total coverage, then how far over the limit the rest are
-        over = sum(np.log(max(v / LIMIT[0], 1)) for v in self.band_max_swr.values())
+        over = sum(np.log(max(v / self.limit, 1)) for v in self.band_max_swr.values())
         return (self.n_ok, sum(self.band_coverage.values()), -over)
-
-
-LIMIT = [3.0]
 
 
 def _antenna_zs(model_file, wires, bands):
@@ -91,40 +83,47 @@ def _antenna_zs(model_file, wires, bands):
     if cache.exists():
         d = np.load(cache)
         if d["key"].shape == key.shape and np.allclose(d["key"], key):
-            have = {round(float(L), 4): z for L, z in zip(d["wires"], d["z"])}
+            have = {_key(L): z for L, z in zip(d["wires"], d["z"])}
             freqs = d["freqs"]
-    todo = [float(L) for L in wires if round(float(L), 4) not in have]
+    todo = [float(L) for L in wires if _key(L) not in have]
     if todo:
         with ProcessPoolExecutor() as ex:
             for L, (freqs, z) in zip(todo, ex.map(_job, [(str(model_file), L, bands) for L in todo])):
-                have[round(L, 4)] = z
+                have[_key(L)] = z
         ws = sorted(have)
         cache.parent.mkdir(parents=True, exist_ok=True)
         np.savez(cache, key=key, wires=ws, freqs=freqs, z=np.array([have[w] for w in ws]))
-    return freqs, [have[round(float(L), 4)] for L in wires]
+    return freqs, [have[_key(L)] for L in wires]
+
+
+def _key(length) -> float:
+    return round(float(length), 4)
 
 
 def search(model_file, wires, lines_e, bands, coax: Feedline, line_z0=450.0, max_swr=3.0,
-           line_loss=0.0, balun: float = 1.0, rank: str = "coverage"):
-    LIMIT[0] = max_swr
+           balun: float = 1.0, rank: str = "coverage") -> list[Result]:
     freqs, zs = _antenna_zs(model_file, wires, bands)
-    band_of = np.concatenate([[b] * len(band_freqs(*bands[b])) for b in bands])
+    # bands are contiguous runs of freqs: band b covers freqs[edges[k]:edges[k + 1]]
+    edges = np.cumsum([0] + [len(band_freqs(*bands[b])) for b in bands])
+    # every line length at once: a column of lengths broadcasts against the frequencies
+    # (a zero-length line is the identity, so "no ladder line" needs no special case)
+    secs = [Feedline(line_z0, np.asarray(lines_e, dtype=float)[:, None])]
+    if balun != 1:
+        secs.append(Transformer(balun))
+    chain = FeedlineChain((*secs, coax))
     results = []
     for L, z_ant in zip(wires, zs):
-        for le in lines_e:
-            secs = [Feedline(line_z0, le, loss_db_100m_10mhz=line_loss)] if le > 0 else []
-            if balun != 1:
-                secs.append(Transformer(balun))
-            chain = FeedlineChain((*secs, coax))
-            s = swr(chain.transform(z_ant, freqs))
-            mx = {b: float(s[band_of == b].max()) for b in bands}
-            cov = {b: float((s[band_of == b] < max_swr).mean()) for b in bands}
-            results.append(Result(float(L), float(le), mx, cov))
+        s = swr(chain.transform(z_ant, freqs))          # shape (line lengths, freqs)
+        mx = np.maximum.reduceat(s, edges[:-1], axis=1)
+        cov = np.add.reduceat(s < max_swr, edges[:-1], axis=1) / np.diff(edges)
+        for k, le in enumerate(lines_e):
+            results.append(Result(float(L), float(le), dict(zip(bands, mx[k].tolist())),
+                                  dict(zip(bands, cov[k].tolist())), max_swr))
     if rank == "minimax":   # smallest worst-band SWR (what a tuner has to cope with)
         results.sort(key=lambda r: max(r.band_max_swr.values()))
     else:
         results.sort(key=lambda r: r.score, reverse=True)
-    return results, freqs, dict(zip(map(float, wires), zs))
+    return results
 
 
 def main(argv=None, prog=None) -> int:
@@ -151,8 +150,8 @@ def main(argv=None, prog=None) -> int:
     wires = np.arange(a.wire[0], a.wire[1] + 1e-9, a.wire[2])
     lines_e = np.arange(a.line[0], a.line[1] + 1e-9, a.line[2])
     coax = Feedline.physical(a.coax_z0, a.coax_length, a.coax_vf, a.coax_loss)
-    results, _, _ = search(a.model_file, wires, lines_e, bands, coax, a.line_z0, a.max_swr,
-                           balun=a.balun, rank=a.rank)
+    results = search(a.model_file, wires, lines_e, bands, coax, a.line_z0, a.max_swr,
+                     balun=a.balun, rank=a.rank)
     print(f"IARU Region {a.region}; {len(wires)} wire × {len(lines_e)} line lengths; "
           + (f"{a.balun:g}:1 balun; " if a.balun != 1 else "") + f"coax: {coax.describe()}; "
           f"SWR limit {a.max_swr:g} (worst SWR per band shown)")

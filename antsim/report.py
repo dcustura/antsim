@@ -14,7 +14,7 @@ def run_model(m: Model, outdir: Path) -> str:
     """Run nec2c for one model; write swr.png, pattern.png, azimuth.png and summary.md.
     Returns the summary text."""
     sweep, pattern = simulate(m, outdir)
-    plot_sweep(sweep, m.name, outdir / "swr.png", m.center_freq)
+    plot_sweep(sweep, m.name, outdir / "swr.png", sweep.index(m.center_freq))
     plot_pattern(pattern, m.name, outdir / "pattern.png", m.azimuth_elevations)
     plot_azimuth_grid(pattern, m.azimuth_elevations, m.name, outdir / "azimuth.png")
     text = summarize(m, sweep, pattern)
@@ -24,11 +24,11 @@ def run_model(m: Model, outdir: Path) -> str:
 
 def summarize(m: Model, sweep: Sweep, pattern: Pattern) -> str:
     i = int(np.argmin(sweep.swr))
-    ic = int(np.argmin(np.abs(sweep.freq - m.center_freq)))
+    ic = sweep.index(m.center_freq)
     gmax, th, ph = pattern.peak()
     res = sweep.resonances()
-    losses = ["ground"] if m.ground.kind == "real" else []
-    losses += ["conductor"] * bool(m.conductivity) + ["loads"] * bool(m.loads)
+    losses = [name for name, on in (("ground", m.ground.kind == "real"),
+                                    ("conductor", m.conductivity), ("loads", m.loads)) if on]
     lines = [
         f"# {m.name}",
         "",
@@ -66,8 +66,7 @@ def summarize(m: Model, sweep: Sweep, pattern: Pattern) -> str:
         f"| R radiation @ {sweep.freq[ic]:.3f} MHz | {sweep.r_rad[ic]:.2f} Ω "
         f"(loss {sweep.z.real[ic] - sweep.r_rad[ic]:.2f} Ω"
         + (f": {', '.join(losses)}" if losses else "") + ") |",
-        f"| Radiation efficiency | {100 * sweep.rad_fraction[ic]:.0f}% "
-        f"({10 * np.log10(sweep.rad_fraction[ic]):.1f} dB; already included in gain figures) |",
+        f"| Radiation efficiency | {sweep.efficiency(ic)}, already included in gain figures |",
         f"| Peak gain @ {pattern.freq:g} MHz | {gmax:.2f} dBi at elevation {90 - th:.0f}°, azimuth {ph:.0f}° |",
     ]
     fb = pattern.front_to_back()
@@ -76,12 +75,11 @@ def summarize(m: Model, sweep: Sweep, pattern: Pattern) -> str:
     lines += ["", "| Elevation | Max gain | at azimuth | Az 0° (+X) | Az 90° (+Y) | Az 180° (−X) |",
               "|---|---|---|---|---|---|"]
     for elev in m.azimuth_elevations:
-        it = int(np.argmin(np.abs(pattern.theta - (90 - elev))))
-        g = pattern.gain[:, it]
+        g, el = pattern.azimuth_cut(elev)
         ip = int(np.argmax(g))
-        g90, g180 = (g[int(np.argmin(np.abs(pattern.phi - a)))] for a in (90, 180))
-        lines.append(f"| {90 - pattern.theta[it]:.0f}° | {g[ip]:.2f} dBi | {pattern.phi[ip]:.0f}° "
-                     f"| {g[0]:.2f} dBi | {g90:.2f} dBi | {g180:.2f} dBi |")
+        g0, g90, g180 = (g[pattern.phi_index(a)] for a in (0, 90, 180))
+        lines.append(f"| {el:.0f}° | {g[ip]:.2f} dBi | {pattern.phi[ip]:.0f}° "
+                     f"| {g0:.2f} dBi | {g90:.2f} dBi | {g180:.2f} dBi |")
     warns = m.check()
     if warns:
         lines += ["", "**Model warnings:**"] + [f"- {w}" for w in warns]
