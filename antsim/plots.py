@@ -49,7 +49,9 @@ def plot_sweep(s: Sweep, title: str, path: Path, ic: int | None = None):
         a3.plot(s.freq, s.z.real - s.r_rad, color=magenta, lw=2, label="R loss")
     a3.set_ylim(0, max(s.z.real.max(), s.r_rad.max()) * 1.1)
     a3.set_ylabel("Resistance (Ω)")
-    a3.set_xlabel("Frequency (MHz)")
+    for ax in axes:     # shared axis, but label every panel so each reads on its own
+        ax.tick_params(labelbottom=True)
+        ax.set_xlabel("Frequency (MHz)")
     a3.legend()
     a3.grid(alpha=0.3)
     ic = len(s.freq) // 2 if ic is None else ic
