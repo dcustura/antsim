@@ -170,7 +170,9 @@ def plot_pattern(p: Pattern, title: str, path: Path, elevations=(5, 10, 20, 30, 
                           ["30°", "60°", "90°", "60°", "30°", "−30°", "−60°", "−90°", "−60°", "−30°"])
     ax.set_title("Elevation", pad=18)
 
-    fig.suptitle(f"{title} — {p.freq:g} MHz, peak {gmax:.2f} dBi")
+    az_pk = "any az" if omni else f"az {ph_pk:.0f}°"
+    fig.suptitle(f"{title} — {p.freq:g} MHz, peak {gmax:.2f} dBi @ {az_pk}, "
+                 f"{90 - th_pk:.0f}° elevation")
     fig.tight_layout(rect=(0, 0, 1, 0.94))   # leave room for the suptitle
     fig.savefig(path, dpi=120)
     plt.close(fig)
