@@ -1,7 +1,7 @@
 """40/20 m trap dipole at 10 m over average ground: 20 m traps (parallel LC), copper wire.
 
 Shows Load.trap_for(); `build(outer)` tunes the outer sections for 40 m:
-    python3 -m antsim tune examples/trap_dipole_40_20.py 7.1 2 5
+    python3 -m antsim tune examples/trapdipole_40m-20m.py 7.1 2 5
 """
 from antsim import AWG, COPPER, Ground, Load, Model
 from antsim.shapes import trap_dipole
@@ -11,11 +11,11 @@ HEIGHT = 10.0        # m
 TRAP_F, TRAP_C = 14.15, 33.0   # trap resonance (MHz) and capacitance (pF)
 
 
-def build(outer: float, name: str | None = None, sweep=(6.9, 7.4, 26), center_freq=7.1) -> Model:
+def build(outer: float, sweep=(6.9, 7.4, 26), center_freq=7.1) -> Model:
     wires, g = trap_dipole(INNER, outer, HEIGHT, AWG[14])
     traps = [Load.trap_for(tag, seg, TRAP_F, TRAP_C) for tag, seg in g["traps"]]
     return Model(
-        name=name or f"trap_dipole_{outer:.2f}m",
+        name=g["tag"],
         wires=wires,
         feed=g["feed"],
         ground=Ground.real(),
@@ -30,6 +30,6 @@ def build(outer: float, name: str | None = None, sweep=(6.9, 7.4, 26), center_fr
 
 
 models = [
-    build(3.56, "trap_dipole_40m"),
-    build(3.56, "trap_dipole_20m", sweep=(13.8, 14.6, 33), center_freq=14.175),
+    build(3.56),
+    build(3.56, sweep=(13.8, 14.6, 33), center_freq=14.175),
 ]

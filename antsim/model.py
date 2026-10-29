@@ -7,6 +7,8 @@ import textwrap
 
 import numpy as np
 
+from . import naming
+
 C = 299.792458  # speed of light, m * MHz
 
 
@@ -79,6 +81,10 @@ class Feedline:
         phys = f" ({self.electrical_length * self.vf:.2f} m physical, VF {self.vf:g})" if self.vf != 1 else ""
         return f"{self.z0:g} Ω line {self.electrical_length:.2f} m electrical{phys}{loss}"
 
+    def tag(self) -> str:
+        """Name token: impedance and physical length, e.g. 450ohm10.6m."""
+        return f"{self.z0:g}ohm{naming.num(self.electrical_length * self.vf)}m"
+
     def transform(self, z_load, f_mhz):
         """Impedance seen at the line input when terminated by z_load."""
         f = np.asarray(f_mhz, dtype=float)
@@ -97,6 +103,9 @@ class Transformer:
     def describe(self) -> str:
         return f"{self.ratio:g}:1 transformer"
 
+    def tag(self) -> str:
+        return f"{self.ratio:g}to1"
+
     def transform(self, z_load, f_mhz):
         return np.asarray(z_load) / self.ratio
 
@@ -108,6 +117,9 @@ class FeedlineChain:
 
     def describe(self) -> str:
         return " → ".join(s.describe() for s in self.sections)
+
+    def tag(self) -> str:
+        return "+".join(s.tag() for s in self.sections)
 
     def transform(self, z_load, f_mhz):
         for sec in self.sections:
@@ -154,7 +166,7 @@ ALUMINIUM = 3.5e7   # S/m
 
 @dataclass
 class Model:
-    name: str
+    name: str                             # geometry, usually the shape's info["tag"]; see naming.py
     wires: list[Wire]
     feed: tuple[int, int] | None = None   # (tag, segment); default: center of wire 1
     ground: Ground = field(default_factory=Ground.free)
@@ -175,6 +187,22 @@ class Model:
             self.feed = (1, self.wires[0].center_segment)
         if self.center_freq is None:
             self.center_freq = (self.sweep[0] + self.sweep[1]) / 2
+
+    @property
+    def slug(self) -> str:
+        """The design: name plus feed, conductor and ground, e.g. dipole_10.27m_h10_avg."""
+        return naming.join(self.name, self.feedline.tag() if self.feedline else "",
+                           naming.conductor(self.conductivity), naming.ground(self.ground))
+
+    @property
+    def band(self) -> str:
+        """Band (or frequency) of the pattern, e.g. 40m."""
+        return naming.band(self.center_freq)
+
+    @property
+    def run_dir(self) -> str:
+        """Output directory under out/: <slug>/<band>."""
+        return f"{self.slug}/{self.band}"
 
     @property
     def nec_feed(self) -> tuple[int, int]:
@@ -222,7 +250,7 @@ class Model:
     def geometry_cards(self) -> list[str]:
         """Every card up to and including EX; append FR/RP/XQ cards and EN to run it."""
         # nec2c reads fixed-width cards: long comment lines crash it, so wrap them
-        lines = [f"CM {self.name}"]
+        lines = [f"CM {chunk}" for chunk in textwrap.wrap(f"{self.slug} {self.band}", 70)]
         for d in self.description.strip().splitlines():
             lines += [f"CM {chunk}" for chunk in textwrap.wrap(d, 70)]
         lines.append("CE")

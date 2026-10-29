@@ -12,10 +12,10 @@ ELEMENTS = [(0.0, 10.50), (3.2, 10.20), (6.4, 9.42)]   # (x position, length) m:
 HEIGHT = 15.0
 
 
-def beam(name, z, ground):
+def beam(z, ground):
     wires, g = yagi(ELEMENTS, z, RADIUS, driven=1)
     return Model(
-        name=name,
+        name=g["tag"],
         wires=wires,
         feed=g["feed"],
         ground=ground,
@@ -28,6 +28,6 @@ def beam(name, z, ground):
 
 
 models = [
-    beam("yagi_3el_20m_free", 0.0, Ground.free()),
-    beam("yagi_3el_20m_15m_real", HEIGHT, Ground.real()),
+    beam(0.0, Ground.free()),
+    beam(HEIGHT, Ground.real()),
 ]

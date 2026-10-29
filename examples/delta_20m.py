@@ -11,7 +11,7 @@ BOTTOM = 6.0         # m
 wires, g = delta_loop(PERIMETER, BOTTOM, AWG[14])
 
 model = Model(
-    name="delta_loop_20m",
+    name=g["tag"],
     wires=wires,
     feed=g["feed"],
     ground=Ground.real(),

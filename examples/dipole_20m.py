@@ -7,10 +7,10 @@ RADIUS = 0.000814    # AWG14
 HEIGHT = 10.0
 
 
-def dipole(name, z, ground, desc):
+def dipole(z, ground, desc):
     wires, info = dipole_wires(2 * HALF, z, RADIUS, segments=21)
     return Model(
-        name=name,
+        name=info["tag"],
         wires=wires,
         feed=info["feed"],
         ground=ground,
@@ -21,8 +21,8 @@ def dipole(name, z, ground, desc):
 
 
 models = [
-    dipole("dipole_20m_free", 0.0, Ground.free(),
+    dipole(0.0, Ground.free(),
            f"Half-wave dipole, {2*HALF:.2f} m AWG14, free space"),
-    dipole("dipole_20m_10m_real", HEIGHT, Ground.real(),
+    dipole(HEIGHT, Ground.real(),
            f"Half-wave dipole, {2*HALF:.2f} m AWG14, {HEIGHT:g} m over average ground"),
 ]

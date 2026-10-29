@@ -5,6 +5,9 @@ Every builder returns `(wires, info)`. `info["feed"]` is the (tag, segment) to p
 for other features (loads, traps) are listed in `info` where relevant. To combine shapes,
 offset the tags yourself: tag = position in the final wire list.
 
+`info["tag"]` names the geometry for `Model(name=...)` (see naming.py), e.g.
+invv_29.39m_apex12_ends4: type, defining length, then heights and other dimensions.
+
 Conventions: Z is height above ground. Horizontal radiators run along Y, so the main lobe
 is along X (azimuth 0°/180°). Beams point towards +X (azimuth 0°).
 """
@@ -13,6 +16,7 @@ from __future__ import annotations
 import math
 
 from .model import Wire, wavelength
+from .naming import join, num, wire
 
 
 def segments_for(length: float, f_max: float, per_wavelength: int = 40, minimum: int = 1) -> int:
@@ -30,7 +34,8 @@ def dipole(length: float, height: float, radius: float, segments: int = 21) -> t
     """Straight centre-fed dipole along Y. Feed is the centre segment of wire 1."""
     h = length / 2
     wires = [Wire((0, -h, height), (0, h, height), radius, _odd(segments))]
-    return wires, dict(feed=(1, wires[0].center_segment))
+    return wires, dict(feed=(1, wires[0].center_segment),
+                       tag=join("dipole", f"{num(length)}m", f"h{num(height)}", wire(radius)))
 
 
 def inverted_v(total: float, apex: float, end_height: float, radius: float,
@@ -49,7 +54,8 @@ def inverted_v(total: float, apex: float, end_height: float, radius: float,
         Wire((0, -y0, apex), (0, y0, apex), radius, 1),   # feed segment
         Wire((0, y0, apex), (0, y0 + dy, end_height), radius, segments),
     ]
-    info = dict(feed=(2, 1), leg=leg, angle=2 * math.degrees(math.atan2(dy, dz)), span=2 * (dy + y0))
+    info = dict(feed=(2, 1), leg=leg, angle=2 * math.degrees(math.atan2(dy, dz)), span=2 * (dy + y0),
+                tag=join("invv", f"{num(total)}m", f"apex{num(apex)}", f"ends{num(end_height)}", wire(radius)))
     return wires, info
 
 
@@ -68,8 +74,10 @@ def trap_dipole(inner: float, outer: float, height: float, radius: float,
         Wire((0, -hi, height), (0, -y_out, height), radius, 1),           # trap −Y
         Wire((0, -y_out, height), (0, -y_out - outer, height), radius, outer_segments),
     ]
-    return wires, dict(feed=(1, wires[0].center_segment), traps=[(2, 1), (4, 1)],
-                       total=inner + 2 * s + 2 * outer)
+    total = inner + 2 * s + 2 * outer
+    return wires, dict(feed=(1, wires[0].center_segment), traps=[(2, 1), (4, 1)], total=total,
+                       tag=join("trapdipole", f"{num(total)}m", f"inner{num(inner)}", f"h{num(height)}",
+                                wire(radius)))
 
 
 def end_fed(length: float, height: float, radius: float, counterpoise: float = 2.0,
@@ -85,7 +93,9 @@ def end_fed(length: float, height: float, radius: float, counterpoise: float = 2
         Wire((0, 0, height - counterpoise), (0, 0, height), radius, cp_segments),
         Wire((0, 0, height), (0, length, height), radius, segments),
     ]
-    return wires, dict(feed=(1, cp_segments))
+    return wires, dict(feed=(1, cp_segments),
+                       tag=join("endfed", f"{num(length)}m", f"h{num(height)}", f"cp{num(counterpoise)}",
+                                wire(radius)))
 
 
 def vertical(height: float, radius: float, base: float = 0.0, radials: int = 4,
@@ -104,7 +114,9 @@ def vertical(height: float, radius: float, base: float = 0.0, radials: int = 4,
         r = math.sqrt(max(rl**2 - radial_droop**2, 0))
         wires.append(Wire((0, 0, base), (r * math.cos(a), r * math.sin(a), base - radial_droop),
                           radius, radial_segments))
-    return wires, dict(feed=(1, 1))
+    rad = join(f"rad{radials}x{num(rl)}", f"droop{num(radial_droop)}" if radial_droop else "") if radials else ""
+    return wires, dict(feed=(1, 1), tag=join("vertical", f"{num(height)}m", f"base{num(base)}", rad,
+                                             wire(radius)))
 
 
 def quad_loop(perimeter: float, bottom: float, radius: float, segments: int = 21) -> tuple[list[Wire], dict]:
@@ -116,7 +128,8 @@ def quad_loop(perimeter: float, bottom: float, radius: float, segments: int = 21
     segments = _odd(segments)
     corners = [(0, -h, z0), (0, h, z0), (0, h, z1), (0, -h, z1)]
     wires = [Wire(corners[i], corners[(i + 1) % 4], radius, segments) for i in range(4)]
-    return wires, dict(feed=(1, wires[0].center_segment), side=s)
+    return wires, dict(feed=(1, wires[0].center_segment), side=s,
+                       tag=join("quad", f"{num(perimeter)}m", f"base{num(bottom)}", wire(radius)))
 
 
 def delta_loop(perimeter: float, bottom: float, radius: float, segments: int = 21) -> tuple[list[Wire], dict]:
@@ -128,7 +141,8 @@ def delta_loop(perimeter: float, bottom: float, radius: float, segments: int = 2
     segments = _odd(segments)
     a, b, c = (0, -h, bottom), (0, h, bottom), (0, 0, top)
     wires = [Wire(a, b, radius, segments), Wire(b, c, radius, segments), Wire(c, a, radius, segments)]
-    return wires, dict(feed=(1, wires[0].center_segment), side=s, top=top)
+    return wires, dict(feed=(1, wires[0].center_segment), side=s, top=top,
+                       tag=join("delta", f"{num(perimeter)}m", f"base{num(bottom)}", wire(radius)))
 
 
 def yagi(elements: list[tuple[float, float]], height: float, radius: float, driven: int = 1,
@@ -138,4 +152,6 @@ def yagi(elements: list[tuple[float, float]], height: float, radius: float, driv
     0-based index of the fed element. Tags follow the list order."""
     wires = [Wire((x, -L / 2, height), (x, L / 2, height), radius, _odd(segments)) for x, L in elements]
     xs = [x for x, _ in elements]
-    return wires, dict(feed=(driven + 1, wires[driven].center_segment), boom=max(xs) - min(xs))
+    boom = max(xs) - min(xs)
+    return wires, dict(feed=(driven + 1, wires[driven].center_segment), boom=boom,
+                       tag=join(f"yagi{len(elements)}", f"boom{num(boom)}", f"h{num(height)}", wire(radius)))

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from antsim import AWG, Feedline, FeedlineChain, Ground, Load, Model, Transformer, Wire, awg
+from antsim import AWG, COPPER, Feedline, FeedlineChain, Ground, Load, Model, Transformer, Wire, awg
 from antsim import shapes
 from antsim.bands import band_of, bands
 from antsim.model import wavelength
@@ -55,6 +55,16 @@ class TestPure(unittest.TestCase):
         warns = Model("t", wires, feed=(3, 1)).check()
         self.assertTrue(any("not joined" in w for w in warns))
         self.assertTrue(any("does not exist" in w for w in warns))
+
+    def test_names(self):
+        wires, g = shapes.inverted_v(29.392, 12, 4, AWG[18])
+        m = Model(g["tag"], wires, feed=g["feed"], ground=Ground.real(), sweep=(3.5, 3.8, 3),
+                  feedline=FeedlineChain((Feedline(450, 9.0), Transformer(4),
+                                          Feedline.physical(50, 10.0, 0.66))),
+                  conductivity=COPPER)
+        self.assertEqual(m.slug, "invv_29.39m_apex12_ends4_awg18_450ohm9m+4to1+50ohm10m_cu_avg")
+        self.assertEqual(m.band, "80m")
+        self.assertEqual(Model("t", wires, sweep=(12, 13, 3)).run_dir, "t_free/12.5MHz")
 
     def test_bands(self):
         self.assertEqual(bands(1, ["40m"])["40m"], (7.0, 7.2))

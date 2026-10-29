@@ -12,13 +12,13 @@ RADIAL_LENGTH = 10.5  # m
 DROOP = 1.5          # radial ends this much lower than the hub, m
 
 
-def build(height: float, name: str | None = None) -> Model:
+def build(height: float) -> Model:
     wires, g = vertical(height, TUBE_1_INCH / 2, base=BASE, radials=RADIALS,
                         radial_length=RADIAL_LENGTH, radial_droop=DROOP)
     for w in wires[1:]:
         w.radius = awg(14)
     return Model(
-        name=name or f"vertical_40m_{height:.2f}m",
+        name=g["tag"],
         wires=wires,
         feed=g["feed"],
         ground=Ground.real(),
@@ -30,4 +30,4 @@ def build(height: float, name: str | None = None) -> Model:
     )
 
 
-models = [build(10.42, "vertical_40m")]
+models = [build(10.42)]

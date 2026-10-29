@@ -11,7 +11,7 @@ HEIGHT = 10.0        # m
 wires, g = end_fed(LENGTH, HEIGHT, AWG[14], counterpoise=2.0)
 
 model = Model(
-    name="efhw_40m",
+    name=g["tag"],
     wires=wires,
     feed=g["feed"],
     ground=Ground.real(),

@@ -14,9 +14,9 @@ def run_model(m: Model, outdir: Path) -> str:
     """Run nec2c for one model; write swr.png, pattern.png, azimuth.png and summary.md.
     Returns the summary text."""
     sweep, pattern = simulate(m, outdir)
-    plot_sweep(sweep, m.name, outdir / "swr.png", sweep.index(m.center_freq))
-    plot_pattern(pattern, m.name, outdir / "pattern.png", m.azimuth_elevations)
-    plot_azimuth_grid(pattern, m.azimuth_elevations, m.name, outdir / "azimuth.png")
+    plot_sweep(sweep, m.slug, outdir / "swr.png", sweep.index(m.center_freq))
+    plot_pattern(pattern, m.slug, outdir / "pattern.png", m.azimuth_elevations)
+    plot_azimuth_grid(pattern, m.azimuth_elevations, m.slug, outdir / "azimuth.png")
     text = summarize(m, sweep, pattern)
     (outdir / "summary.md").write_text(text)
     return text
@@ -30,7 +30,7 @@ def summarize(m: Model, sweep: Sweep, pattern: Pattern) -> str:
     losses = [name for name, on in (("ground", m.ground.kind == "real"),
                                     ("conductor", m.conductivity), ("loads", m.loads)) if on]
     lines = [
-        f"# {m.name}",
+        f"# {m.slug} — {m.band}",
         "",
         m.description.strip(),
         "",

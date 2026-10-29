@@ -21,9 +21,9 @@ Then run `claude` in this directory. `CLAUDE.md` gives Claude the workflow, the 
 ```sh
 python3 -m antsim examples                                   # list reference models
 python3 -m antsim new my_dipole --from dipole_20m            # copy one to models/
-python3 -m antsim run models/my_dipole.py                    # simulate → out/<name>/
-python3 -m antsim tune examples/invv_40m_apex10.py 7.1 19 22 # resonant length
-python3 -m antsim multiband examples/doublet_multiband.py --wire 20 30 1 --line 5 20 0.5 --balun 4
+python3 -m antsim run models/my_dipole.py                    # simulate → out/<slug>/<band>/
+python3 -m antsim tune examples/invv_40m_apex10_ends3.py 7.1 19 22  # resonant length
+python3 -m antsim multiband examples/dipole_multiband.py --wire 20 30 1 --line 5 20 0.5 --balun 4
 python3 -m antsim bands --region 1
 ```
 
@@ -34,17 +34,39 @@ from antsim import AWG, Ground, Model
 from antsim.shapes import inverted_v
 
 wires, info = inverted_v(total=20.6, apex=10, end_height=3, radius=AWG[14])
-model = Model("my_invv", wires, feed=info["feed"], ground=Ground.real(),
+model = Model(info["tag"], wires, feed=info["feed"], ground=Ground.real(),
               sweep=(6.9, 7.4, 26), center_freq=7.1)
 ```
 
-Every run writes these files to `out/<name>/`:
+Every run writes these files to `out/<slug>/<band>/` (see [Naming](#naming)), here `out/invv_20.6m_apex10_ends3_avg/40m/`:
 
 - `summary.md`: resonance, Z, SWR, bandwidth, R radiation vs loss, efficiency, peak gain, F/B, and gain per elevation.
 - `swr.png`: SWR, R/X at the antenna (and at the line input when there is a feedline), and the resistance breakdown.
 - `pattern.png`: an overlay of azimuth cuts plus an elevation cut through the peak.
 - `azimuth.png`: one azimuth plot per elevation, on a shared scale.
-- `sweep.nec/.out` and `pattern.nec/.out`: the raw NEC decks and nec2c output (`xnec2c -i out/<name>/pattern.nec`).
+- `sweep.nec/.out` and `pattern.nec/.out`: the raw NEC decks and nec2c output (`xnec2c -i out/<slug>/<band>/pattern.nec`).
+
+## Naming
+
+Model files describe a design: `<type>_<band>[_<features>].py`. Examples are `invv_80m_apex12_ends4.py`, `trapdipole_40m-20m.py` and `dipole_multiband.py`. The type is the shape's word (`dipole`, `invv`, `trapdipole`, `endfed`, `vertical`, `quad`, `delta`, `yagi3`), and the features are what tell this design apart from others of the same type.
+
+Each model inside a file names its output directory from its own parameters, so the name always matches what was simulated:
+
+```
+out/<geometry>[_<wire>][_<feed>][_<conductor>]_<ground>/<band>/
+out/invv_29.39m_apex12_ends4_450ohm10.6m_avg/80m/
+```
+
+| Part | Tokens |
+|---|---|
+| geometry | type, then the defining length in m (total wire, radiator, perimeter), then heights and other dimensions: `dipole_10.27m_h10`, `invv_29.39m_apex12_ends4`, `endfed_19.5m_h10_cp2`, `vertical_10.42m_base2.5_rad4x10.5_droop1.5`, `delta_22.5m_base6`, `trapdipole_18.07m_inner10_h10`, `yagi3_boom6.4_h15` |
+| wire | omitted for AWG14; `awg18`, or `d12.7mm` for tube |
+| feed | each section antenna side first, joined with `+`: `450ohm9m+4to1+50ohm10m` (physical lengths) |
+| conductor | omitted when lossless; `cu`, `al` |
+| ground | `free`, `perfect`, `avg`, `poor`, `good`, or `er<εr>s<σ>` |
+| band | IARU band of the pattern frequency (`40m`), else the frequency (`12.5MHz`) |
+
+Numbers are in metres, rounded to the centimetre. The same antenna on two bands shares one design directory. `run` refuses to start if two models would write to the same directory.
 
 ## What it models
 
@@ -61,19 +83,19 @@ Every run writes these files to `out/<name>/`:
 | File | Shows |
 |---|---|
 | `dipole_20m.py` | Free space vs real ground; the basic template. |
-| `invv_40m_apex10.py` | A `build(length)` function for `tune`. |
+| `invv_40m_apex10_ends3.py` | A `build(length)` function for `tune`. |
 | `vertical_40m.py` | Elevated, drooping radials; tube radiator with wire radials. |
-| `efhw_40m.py` | High-Z feed with a transformer-referred `z0`. |
-| `delta_loop_20m.py` | Loop builder, λ/4 matching section referred `z0`. |
-| `trap_dipole_40_20.py` | `Load.trap_for`, copper loss, one antenna on two bands. |
-| `yagi_3el_20m.py` | A beam: F/B ratio, aluminium elements. |
-| `doublet_multiband.py` | Ladder line + 4:1 balun + coax `FeedlineChain`, used for `multiband`. |
+| `endfed_40m.py` | High-Z feed with a transformer-referred `z0`. |
+| `delta_20m.py` | Loop builder, λ/4 matching section referred `z0`. |
+| `trapdipole_40m-20m.py` | `Load.trap_for`, copper loss, one antenna on two bands. |
+| `yagi3_20m.py` | A beam: F/B ratio, aluminium elements. |
+| `dipole_multiband.py` | Doublet: ladder line + 4:1 balun + coax `FeedlineChain`, used for `multiband`. |
 
 ## Layout
 
 ```
 antsim/      package: model.py, nec.py, report.py, plots.py, shapes.py, tune.py,
-             multiband.py, bands.py, wire_gauge.py, cli.py
+             multiband.py, bands.py, wire_gauge.py, cli.py, naming.py
 examples/    reference models (tuned, known good)
 models/      your designs
 out/         generated results (gitignored)

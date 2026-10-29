@@ -1,7 +1,7 @@
 """antsim: NEC2 wire-antenna modelling from Python model files.
 
 Commands:
-  run FILE...                   simulate model files; write plots and summary.md under out/<name>/
+  run FILE...                   simulate model files; write plots and summary.md under out/<slug>/<band>/
   tune FILE FREQ LO HI [...]    find the length that makes build(length) resonant
   multiband FILE --wire ... [...]  search wire × feedline lengths for multiband SWR
   new NAME [--from EXAMPLE]     start models/NAME.py from an example
@@ -28,19 +28,25 @@ COMMANDS = ("run", "tune", "multiband", "new", "examples", "bands", "doctor")
 def cmd_run(argv) -> int:
     ap = argparse.ArgumentParser(prog="antsim run", description="Simulate model files.")
     ap.add_argument("files", nargs="+", type=Path)
-    ap.add_argument("--only", help="run only the model with this name (when a file defines several)")
+    ap.add_argument("--only", help="run only the models with this name, slug or slug/band "
+                    "(when a file defines several)")
     a = ap.parse_args(argv)
     from .report import run_model
     models = []
     for path in a.files:
         found = load_models(path)
         if a.only:
-            found = [m for m in found if m.name == a.only]
+            found = [m for m in found if a.only in (m.name, m.slug, m.run_dir)]
             if not found:
                 raise SystemExit(f"{path}: no model named {a.only!r}")
         models += found
-    outdirs = [out_root() / m.name for m in models]
-    # models are independent (each owns out/<name>/), so run them on all cores;
+    runs = [m.run_dir for m in models]
+    dups = sorted({r for r in runs if runs.count(r) > 1})
+    if dups:
+        raise SystemExit("several models would write to the same directory (give them distinct "
+                         "names, e.g. a variant suffix): " + ", ".join(dups))
+    outdirs = [out_root() / r for r in runs]
+    # models are independent (each owns out/<slug>/<band>/), so run them on all cores;
     # map() keeps the summaries in input order
     if len(models) == 1:
         summaries = [run_model(models[0], outdirs[0])]

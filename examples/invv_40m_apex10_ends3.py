@@ -1,6 +1,6 @@
 """40 m inverted-V with build(length) for `antsim tune`; apex 10 m, ends 3 m, average ground.
 
-Find the resonant length:  python3 -m antsim tune examples/invv_40m_apex10.py 7.1 18 23
+Find the resonant length:  python3 -m antsim tune examples/invv_40m_apex10_ends3.py 7.1 18 23
 """
 from antsim import AWG, Ground, Model
 from antsim.shapes import inverted_v
@@ -10,11 +10,11 @@ END_HEIGHT = 3.0     # m
 RADIUS = AWG[14]
 
 
-def build(total: float, name: str | None = None) -> Model:
+def build(total: float) -> Model:
     """Inverted-V with `total` metres of wire (incl. the 0.25 m feed gap)."""
     wires, g = inverted_v(total, APEX, END_HEIGHT, RADIUS, segments=41)
     return Model(
-        name=name or f"invv_40m_{total:.2f}m",
+        name=g["tag"],
         wires=wires,
         feed=g["feed"],
         ground=Ground.real(),
@@ -26,4 +26,4 @@ def build(total: float, name: str | None = None) -> Model:
     )
 
 
-models = [build(20.6, "invv_40m_apex10")]
+models = [build(20.6)]
