@@ -20,6 +20,12 @@ class TestPure(unittest.TestCase):
         self.assertAlmostEqual(AWG[14], 0.000814, places=6)
         self.assertAlmostEqual(awg(12), 0.001026, places=6)
 
+    def test_tube_diameters(self):
+        from antsim.wire_gauge import TUBE_1_INCH, TUBE_3_8_INCH, TUBE_HALF_INCH
+        self.assertAlmostEqual(TUBE_1_INCH, 0.0254)
+        self.assertAlmostEqual(TUBE_HALF_INCH, 0.0127)
+        self.assertAlmostEqual(TUBE_3_8_INCH, 0.009525)
+
     def test_feedline_half_wave_repeats_load(self):
         f = 10.0
         line = Feedline(450, wavelength(f) / 2)

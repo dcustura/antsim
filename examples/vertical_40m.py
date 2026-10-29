@@ -4,7 +4,7 @@
 """
 from antsim import Ground, Model
 from antsim.shapes import vertical
-from antsim.wire_gauge import TUBE_1_INCH, awg
+from antsim.wire_gauge import TUBE_HALF_INCH, awg
 
 BASE = 2.5           # feed point / radial hub height, m
 RADIALS = 4
@@ -13,7 +13,7 @@ DROOP = 1.5          # radial ends this much lower than the hub, m
 
 
 def build(height: float) -> Model:
-    wires, g = vertical(height, TUBE_1_INCH / 2, base=BASE, radials=RADIALS,
+    wires, g = vertical(height, TUBE_HALF_INCH / 2, base=BASE, radials=RADIALS,
                         radial_length=RADIAL_LENGTH, radial_droop=DROOP)
     for w in wires[1:]:
         w.radius = awg(14)

@@ -10,6 +10,6 @@ def awg(n: int) -> float:
 AWG = {n: awg(n) for n in range(8, 25)}   # AWG[14] = 0.000814
 
 # Tubing, by outside diameter
-TUBE_HALF_INCH = 0.00635
-TUBE_3_8_INCH = 0.00476
-TUBE_1_INCH = 0.0127
+TUBE_3_8_INCH = 0.009525
+TUBE_HALF_INCH = 0.0127
+TUBE_1_INCH = 0.0254
