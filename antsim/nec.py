@@ -8,7 +8,7 @@ import subprocess
 
 import numpy as np
 
-from .model import Feedline, FeedlineChain, Model
+from .model import FeedElement, Model
 
 _FREQ = re.compile(r"FREQUENCY\s*:\s*([-\d.E+]+)\s*MHz")
 
@@ -24,7 +24,7 @@ class Sweep:
     z: np.ndarray      # complex ohms
     z0: float
     rad_fraction: np.ndarray | None = None  # radiated / input power, from pattern averaging
-    feedline: Feedline | FeedlineChain | None = None
+    feedline: FeedElement | None = None
 
     @property
     def z_line(self):
@@ -118,7 +118,7 @@ def run_nec(deck: str, path: Path) -> str:
 
 
 def parse_sweep(text: str, feed: tuple[int, int], z0: float,
-                feedline: Feedline | FeedlineChain | None = None) -> Sweep:
+                feedline: FeedElement | None = None) -> Sweep:
     freqs, zs = parse_freq_z(text, feed)
     frac = [radiated_fraction(p) for p in parse_patterns(text)]
     if len(frac) != len(freqs):

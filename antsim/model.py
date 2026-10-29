@@ -119,9 +119,57 @@ class Transformer:
 
 
 @dataclass
+class Component:
+    """Ideal inductor or capacitor in the feed system (a matching network element):
+    in series with the line, or shunted across it. Build with Component.series(...) or
+    Component.shunted(...), giving exactly one of l_uh and c_pf. An L-network is two
+    of these in a FeedlineChain, antenna side first."""
+    shunt: bool
+    inductor: bool
+    value: float           # µH for an inductor, pF for a capacitor
+
+    def __post_init__(self):
+        if not self.value > 0:
+            raise ValueError(f"component value must be positive, got {self.value!r}")
+
+    @classmethod
+    def _make(cls, shunt: bool, l_uh: float, c_pf: float):
+        if (l_uh > 0) == (c_pf > 0) or min(l_uh, c_pf) < 0:
+            raise ValueError("give exactly one positive value, l_uh or c_pf")
+        return cls(shunt, l_uh > 0, l_uh or c_pf)
+
+    @classmethod
+    def series(cls, l_uh: float = 0.0, c_pf: float = 0.0): return cls._make(False, l_uh, c_pf)
+
+    @classmethod
+    def shunted(cls, l_uh: float = 0.0, c_pf: float = 0.0): return cls._make(True, l_uh, c_pf)
+
+    def describe(self) -> str:
+        number, unit = naming.lc(self.value, self.inductor)
+        return f"{number} {unit} {'shunt' if self.shunt else 'series'}"
+
+    def tag(self) -> str:
+        """e.g. shunt2.26uH, ser126pF."""
+        number, unit = naming.lc(self.value, self.inductor)
+        return ("shunt" if self.shunt else "ser") + number + unit.replace("µ", "u")
+
+    def reactance(self, f_mhz):
+        w = 2 * np.pi * np.asarray(f_mhz, dtype=float) * 1e6
+        return w * self.value * 1e-6 if self.inductor else -1 / (w * self.value * 1e-12)
+
+    def transform(self, z_load, f_mhz):
+        jx = 1j * self.reactance(f_mhz)
+        z = np.asarray(z_load)
+        return z * jx / (z + jx) if self.shunt else z + jx
+
+
+FeedSection = Feedline | Transformer | Component
+
+
+@dataclass
 class FeedlineChain:
     """Several line sections in series, antenna side first."""
-    sections: tuple[Feedline | Transformer, ...]
+    sections: tuple[FeedSection, ...]
 
     def describe(self) -> str:
         return " → ".join(s.describe() for s in self.sections)
@@ -133,6 +181,9 @@ class FeedlineChain:
         for sec in self.sections:
             z_load = sec.transform(z_load, f_mhz)
         return z_load
+
+
+FeedElement = FeedSection | FeedlineChain
 
 
 @dataclass
@@ -184,7 +235,7 @@ class Model:
     pattern_step: float = 5.0             # degrees
     azimuth_elevations: tuple[float, ...] = (5, 10, 20, 30, 45, 60)  # azimuth cuts, degrees
     description: str = ""
-    feedline: Feedline | FeedlineChain | None = None  # SWR/z_line then refer to the line input
+    feedline: FeedElement | None = None   # SWR/z_line then refer to the line input
     loads: list[Load] = field(default_factory=list)
     conductivity: float | None = None     # S/m for all wires (COPPER, ALUMINIUM); None = lossless
 

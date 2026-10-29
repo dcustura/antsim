@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from antsim import AWG, COPPER, Feedline, FeedlineChain, Ground, Load, Model, Transformer, Wire, awg
+from antsim import AWG, COPPER, Component, Feedline, FeedlineChain, Ground, Load, Model, Transformer, Wire, awg
 from antsim import shapes
 from antsim.bands import band_of, bands
 from antsim.model import wavelength
@@ -34,6 +34,21 @@ class TestPure(unittest.TestCase):
     def test_chain_transformer(self):
         chain = FeedlineChain((Feedline(450, 0.0), Transformer(4)))
         self.assertAlmostEqual(complex(chain.transform(200 + 0j, 7.0)), 50 + 0j)
+
+    def test_l_network_matches(self):
+        # shunt L then series C, designed for 60.4 -j193.9 ohm at 7.1 MHz
+        chain = FeedlineChain((Component.shunted(l_uh=2.2617), Component.series(c_pf=126.01)))
+        z = complex(chain.transform(60.4 - 193.9j, 7.1))
+        self.assertAlmostEqual(z.real, 50, delta=0.1)
+        self.assertAlmostEqual(z.imag, 0, delta=0.1)
+        self.assertEqual(chain.tag(), "shunt2.26uH+ser126pF")
+        self.assertRaises(ValueError, Component.series, l_uh=1, c_pf=1)
+        self.assertEqual(Component.series(c_pf=1000).tag(), "ser1nF")
+        self.assertEqual(Component.shunted(c_pf=1500).describe(), "1.5 nF shunt")
+        self.assertEqual(Component.series(l_uh=0.5).tag(), "ser0.5uH")
+        self.assertEqual(Component.series(c_pf=999.7).tag(), "ser1nF")
+        self.assertRaises(ValueError, Component, True, True, 0)
+        self.assertAlmostEqual(complex(Component.shunted(l_uh=1).transform(0j, 7.0)), 0j)
 
     def test_transformer_labels(self):
         self.assertEqual(Transformer(4).tag(), "4to1")
