@@ -35,6 +35,13 @@ class TestPure(unittest.TestCase):
         chain = FeedlineChain((Feedline(450, 0.0), Transformer(4)))
         self.assertAlmostEqual(complex(chain.transform(200 + 0j, 7.0)), 50 + 0j)
 
+    def test_transformer_labels(self):
+        self.assertEqual(Transformer(4).tag(), "4to1")
+        self.assertEqual(Transformer(0.25).describe(), "1:4 transformer")
+        self.assertEqual(Transformer(0.3).tag(), "1to3.33")
+        self.assertRaises(ValueError, Transformer, 0)
+        self.assertRaises(ValueError, Transformer, -4)
+
     def test_trap_for_resonates(self):
         t = Load.trap_for(2, 1, 14.15, 33)
         f = 1 / (2 * np.pi * np.sqrt(t.l * t.c)) / 1e6

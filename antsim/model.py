@@ -97,14 +97,22 @@ class Feedline:
 
 @dataclass
 class Transformer:
-    """Ideal impedance transformer (balun/unun), ratio N:1 from antenna side to shack side."""
+    """Ideal impedance transformer (balun/unun), ratio N:1 from antenna side to shack side.
+    N < 1 steps the impedance up: Transformer(0.25) is a 1:4."""
     ratio: float
 
+    def __post_init__(self):
+        if not self.ratio > 0:
+            raise ValueError(f"transformer ratio must be positive, got {self.ratio!r}")
+
+    def _sides(self) -> tuple[str, str]:
+        return ("1", naming.num(1 / self.ratio)) if self.ratio < 1 else (naming.num(self.ratio), "1")
+
     def describe(self) -> str:
-        return f"{self.ratio:g}:1 transformer"
+        return "{}:{} transformer".format(*self._sides())
 
     def tag(self) -> str:
-        return f"{self.ratio:g}to1"
+        return "{}to{}".format(*self._sides())
 
     def transform(self, z_load, f_mhz):
         return np.asarray(z_load) / self.ratio

@@ -137,7 +137,7 @@ def main(argv=None, prog=None) -> int:
     ap.add_argument("--coax-vf", type=float, default=0.66)
     ap.add_argument("--coax-z0", type=float, default=50.0)
     ap.add_argument("--coax-loss", type=float, default=0.0, help="dB/100 m at 10 MHz")
-    ap.add_argument("--balun", type=float, default=1.0, help="ideal N:1 transformer at line/coax junction")
+    ap.add_argument("--balun", type=float, default=1.0, help="ideal N:1 transformer at line/coax junction; N < 1 steps up (0.25 = 1:4)")
     ap.add_argument("--max-swr", type=float, default=3.0)
     ap.add_argument("--top", type=int, default=10)
     ap.add_argument("--rank", choices=["coverage", "minimax"], default="coverage",
@@ -153,7 +153,7 @@ def main(argv=None, prog=None) -> int:
     results = search(a.model_file, wires, lines_e, bands, coax, a.line_z0, a.max_swr,
                      balun=a.balun, rank=a.rank)
     print(f"IARU Region {a.region}; {len(wires)} wire × {len(lines_e)} line lengths; "
-          + (f"{a.balun:g}:1 balun; " if a.balun != 1 else "") + f"coax: {coax.describe()}; "
+          + (f"{Transformer(a.balun).describe()}; " if a.balun != 1 else "") + f"coax: {coax.describe()}; "
           f"SWR limit {a.max_swr:g} (worst SWR per band shown)")
     hdr = f"{'wire':>6} {'line':>6} {'ok':>3} | " + " ".join(f"{b:>5}" for b in bands)
     print(hdr)
